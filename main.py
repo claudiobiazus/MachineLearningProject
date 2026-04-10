@@ -28,6 +28,8 @@ from skimage.feature import hog
 from model_analysis import plot_feature_importance, plot_confusion_matrix, plot_all_roc
 from sklearn.metrics import roc_curve, auc
 
+print("Oi")
+
 # -------------------------------
 # 0 - Função: Carregar Fer-2013
 # -------------------------------
