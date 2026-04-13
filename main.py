@@ -29,6 +29,10 @@ from collections import Counter
 from model_analysis import plot_feature_importance, plot_confusion_matrix, plot_all_roc
 from sklearn.metrics import roc_curve, auc
 
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.utils import to_categorical
+
 # -------------------------------
 # 0 - Função: Carregar Fer-2013
 # -------------------------------
@@ -473,7 +477,80 @@ def train_models_fer_hog(X_raw, y, output_dir="plots_fer"):
     return results_df
 
 # -------------------------------
-# 5 - Execução principal
+# 5 - CNN-FER-2013
+# -------------------------------
+def train_models_fer_cnn(X_raw, y, output_dir="plots_fer_cnn"):
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+
+    print("\n==============================")
+    print("DEBUG: TREINAMENTO CNN FER-2013")
+    print("==============================")
+
+    # -------------------------
+    # reshape para CNN
+    # -------------------------
+    X = X_raw.reshape(-1, 48, 48, 1).astype("float32") / 255.0
+
+    # one-hot encoding
+    y_cat = to_categorical(y)
+
+    # split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y_cat,
+        test_size=0.2,
+        stratify=y,
+        random_state=42
+    )
+
+    # -------------------------
+    # CNN simples (baseline)
+    # -------------------------
+    model = Sequential([
+        Conv2D(32, (3,3), activation='relu', input_shape=(48,48,1)),
+        MaxPooling2D(2,2),
+
+        Conv2D(64, (3,3), activation='relu'),
+        MaxPooling2D(2,2),
+
+        Conv2D(128, (3,3), activation='relu'),
+        MaxPooling2D(2,2),
+
+        Flatten(),
+        Dense(128, activation='relu'),
+        Dropout(0.5),
+        Dense(7, activation='softmax')
+    ])
+
+    model.compile(
+        optimizer='adam',
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    # -------------------------
+    # treino
+    # -------------------------
+    history = model.fit(
+        X_train, y_train,
+        validation_data=(X_test, y_test),
+        epochs=20,
+        batch_size=64,
+        verbose=1
+    )
+
+    # -------------------------
+    # avaliação
+    # -------------------------
+    loss, acc = model.evaluate(X_test, y_test, verbose=0)
+
+    print("\nRESULTADOS CNN")
+    print("Accuracy:", acc)
+
+    return model, history, acc
+
+# -------------------------------
+# 6 - Execução principal
 # -------------------------------
 if __name__ == "__main__":
     # -------------------------
@@ -491,4 +568,8 @@ if __name__ == "__main__":
     FER_TRAIN_PATH = "archive/train"
     X_raw, y = load_fer_from_folders(FER_TRAIN_PATH, limit_per_class=3000) # 1000, 2000
 
+    # SVM
     results_fer = train_models_fer_hog(X_raw, y)
+
+    # CNN
+    cnn_model, history, cnn_acc = train_models_fer_cnn(X_raw, y)
