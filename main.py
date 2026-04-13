@@ -24,11 +24,10 @@ from sklearn.model_selection import GridSearchCV
 
 from sklearn.preprocessing import LabelEncoder
 from skimage.feature import hog
+from collections import Counter
 
 from model_analysis import plot_feature_importance, plot_confusion_matrix, plot_all_roc
 from sklearn.metrics import roc_curve, auc
-
-print("Oi")
 
 # -------------------------------
 # 0 - Função: Carregar Fer-2013
@@ -370,15 +369,52 @@ def train_and_evaluate_models(X_train, X_test, y_train, y_test, output_dir="plot
 def train_models_fer_hog(X_raw, y, output_dir="plots_fer"):
     os.makedirs(output_dir, exist_ok=True)
 
+    print("\n==============================")
+    print("DEBUG: FUNÇÃO FER EXECUTANDO")
+    print("==============================")
+
     print("Extraindo HOG features...")
     X = extract_hog_features(X_raw)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
+    print("\nDistribuição das classes (antes da divisão):")
+    counter = Counter(y)
+    total = sum(counter.values())
+
+    emotion_labels = {
+        0: "Angry",
+        1: "Disgust",
+        2: "Fear",
+        3: "Happy",
+        4: "Sad",
+        5: "Surprise",
+        6: "Neutral"
+    }
+
+    for classe in sorted(counter.keys()):
+        nome = emotion_labels.get(classe, str(classe))
+        pct = (counter[classe] / total) * 100
+        print(f"{nome}: {counter[classe]} ({pct:.2f}%)")
+
+    # -------------------------------
+    # Split
+    # -------------------------------
+    X_train, X_test, y_train, y_test = train_test_split(X, y,
         test_size=0.2,
         stratify=y,
         random_state=42
     )
+
+    print("\nDistribuição no treino:")
+    train_counter = Counter(y_train)
+    for classe in sorted(train_counter.keys()):
+        nome = emotion_labels.get(classe, str(classe))
+        print(f"{nome}: {train_counter[classe]}")
+
+    print("\nDistribuição no teste:")
+    test_counter = Counter(y_test)
+    for classe in sorted(test_counter.keys()):
+        nome = emotion_labels.get(classe, str(classe))
+        print(f"{nome}: {test_counter[classe]}")
 
     kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
@@ -453,42 +489,6 @@ if __name__ == "__main__":
     # FER-2013 (HOG + PCA + SVM)
     # -------------------------
     FER_TRAIN_PATH = "archive/train"
-    X_raw, y = load_fer_from_folders(FER_TRAIN_PATH, limit_per_class=1000)
-    print("Extraindo HOG features...")
-    X = extract_hog_features(X_raw)
+    X_raw, y = load_fer_from_folders(FER_TRAIN_PATH, limit_per_class=3000) # 1000, 2000
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, stratify=y, random_state=42
-    )
-
-    pipeline = Pipeline([
-        ('pca', PCA()),
-        ('model', SVC(kernel='rbf'))
-    ])
-
-    param_grid = {
-        'pca__n_components': [50, 100, 150],
-        'model__C': [1, 5, 10, 20],
-        'model__gamma': ['scale', 0.001, 0.0005]
-    }
-
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-
-    svm = GridSearchCV(
-        pipeline,
-        param_grid,
-        cv=cv,
-        scoring='f1_weighted',
-        n_jobs=-1,
-        verbose=0
-    )
-
-    print("Treinando HOG + PCA + SVM ...")
-    svm.fit(X_train, y_train)
-
-    y_pred = svm.predict(X_test)
-
-    print("\nRESULTADOS FINAIS")
-    print("Accuracy:", accuracy_score(y_test, y_pred))
-    print("F1:", f1_score(y_test, y_pred, average='weighted'))
-    print("Best params:", svm.best_params_)
+    results_fer = train_models_fer_hog(X_raw, y)
