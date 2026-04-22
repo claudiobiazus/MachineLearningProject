@@ -29,9 +29,15 @@ from collections import Counter
 from model_analysis import plot_feature_importance, plot_confusion_matrix, plot_all_roc
 from sklearn.metrics import roc_curve, auc
 
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import (Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization)
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from sklearn.model_selection import train_test_split
+
+from collections import defaultdict
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # -------------------------------
 # 0 - Função: Carregar Fer-2013
@@ -63,6 +69,9 @@ def load_fer_from_folders(base_path, img_size=(48, 48), limit_per_class=None):
     class_labels = os.listdir(base_path)
     print("Classes encontradas:", class_labels)
 
+    total_per_class = defaultdict(int)  # TOTAL real
+    used_per_class = defaultdict(int)   # após limite
+
     for label in class_labels:
         class_path = os.path.join(base_path, label)
 
@@ -71,6 +80,10 @@ def load_fer_from_folders(base_path, img_size=(48, 48), limit_per_class=None):
 
         images = os.listdir(class_path)
 
+        # Conta TOTAL antes do corte
+        total_per_class[label] = len(images)
+
+        # Aplica limite
         if limit_per_class:
             images = images[:limit_per_class]
 
@@ -88,6 +101,8 @@ def load_fer_from_folders(base_path, img_size=(48, 48), limit_per_class=None):
             X.append(img)
             y.append(label)
 
+            used_per_class[label] += 1  # Conta usado
+
     X = np.array(X)
     y = np.array(y)
 
@@ -96,6 +111,17 @@ def load_fer_from_folders(base_path, img_size=(48, 48), limit_per_class=None):
 
     print("Shape X:", X.shape)
     print("Shape y:", y.shape)
+
+    # Print Bonito
+    print("\n==============================")
+    print("DISTRIBUIÇÃO DO DATASET")
+    print("==============================")
+
+    for label in sorted(total_per_class.keys()):
+        total = total_per_class[label]
+        used = used_per_class[label]
+
+        print(f"Classe {label}: TOTAL={total} | USADO={used}")
 
     return X, y
 
@@ -370,7 +396,7 @@ def train_and_evaluate_models(X_train, X_test, y_train, y_test, output_dir="plot
 # -------------------------------
 # 4 - FER-2013
 # -------------------------------
-def train_models_fer_hog(X_raw, y, output_dir="plots_fer"):
+def train_models_fer_hog(X_train_raw, y_train, X_test_raw, y_test, output_dir="plots_fer"):
     os.makedirs(output_dir, exist_ok=True)
 
     print("\n==============================")
@@ -378,11 +404,6 @@ def train_models_fer_hog(X_raw, y, output_dir="plots_fer"):
     print("==============================")
 
     print("Extraindo HOG features...")
-    X = extract_hog_features(X_raw)
-
-    print("\nDistribuição das classes (antes da divisão):")
-    counter = Counter(y)
-    total = sum(counter.values())
 
     emotion_labels = {
         0: "Angry",
@@ -394,19 +415,27 @@ def train_models_fer_hog(X_raw, y, output_dir="plots_fer"):
         6: "Neutral"
     }
 
-    for classe in sorted(counter.keys()):
-        nome = emotion_labels.get(classe, str(classe))
-        pct = (counter[classe] / total) * 100
-        print(f"{nome}: {counter[classe]} ({pct:.2f}%)")
+    print("\nDistribuição no treino (%):")
+    counter_train = Counter(y_train)
+    total_train = sum(counter_train.values())
 
-    # -------------------------------
-    # Split
-    # -------------------------------
-    X_train, X_test, y_train, y_test = train_test_split(X, y,
-        test_size=0.2,
-        stratify=y,
-        random_state=42
-    )
+    for classe in sorted(counter_train.keys()):
+        nome = emotion_labels.get(classe, str(classe))
+        pct = (counter_train[classe] / total_train) * 100
+        print(f"{nome}: {counter_train[classe]} ({pct:.2f}%)")
+
+    print("\nDistribuição no teste (%):")
+    counter_test = Counter(y_test)
+    total_test = sum(counter_test.values())
+
+    for classe in sorted(counter_test.keys()):
+        nome = emotion_labels.get(classe, str(classe))
+        pct = (counter_test[classe] / total_test) * 100
+        print(f"{nome}: {counter_test[classe]} ({pct:.2f}%)")
+
+    X_train = extract_hog_features(X_train_raw)
+    X_test = extract_hog_features(X_test_raw)
+    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42 )
 
     print("\nDistribuição no treino:")
     train_counter = Counter(y_train)
@@ -484,18 +513,20 @@ def train_models_fer_cnn(X_raw, y, output_dir="plots_fer_cnn"):
     os.makedirs(output_dir, exist_ok=True)
 
     print("\n==============================")
-    print("DEBUG: TREINAMENTO CNN FER-2013")
+    print("DEBUG: TREINAMENTO CNN FER-2013 (IMPROVED)")
     print("==============================")
 
     # -------------------------
-    # reshape para CNN
+    # reshape + normalização
     # -------------------------
-    X = X_raw.reshape(-1, 48, 48, 1).astype("float32") / 255.0
+    X_train = X_train.reshape(-1, 48, 48, 1) / 255.0
+    X_test = X_test.reshape(-1, 48, 48, 1) / 255.0
 
-    # one-hot encoding
+    y_train_cat = to_categorical(y_train)
+    y_test_cat = to_categorical(y_test)
+    X = X_raw.reshape(-1, 48, 48, 1).astype("float32") / 255.0
     y_cat = to_categorical(y)
 
-    # split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y_cat,
         test_size=0.2,
@@ -504,24 +535,54 @@ def train_models_fer_cnn(X_raw, y, output_dir="plots_fer_cnn"):
     )
 
     # -------------------------
-    # CNN simples (baseline)
+    # DATA AUGMENTATION
     # -------------------------
-    model = Sequential([
-        Conv2D(32, (3,3), activation='relu', input_shape=(48,48,1)),
-        MaxPooling2D(2,2),
+    datagen = ImageDataGenerator(
+        rotation_range=15,
+        width_shift_range=0.1,
+        height_shift_range=0.1,
+        zoom_range=0.1,
+        horizontal_flip=True
+    )
 
-        Conv2D(64, (3,3), activation='relu'),
-        MaxPooling2D(2,2),
+    datagen.fit(X_train)
 
-        Conv2D(128, (3,3), activation='relu'),
-        MaxPooling2D(2,2),
+    # -------------------------
+    # CNN MELHORADA
+    # -------------------------
+    model = Sequential()
 
-        Flatten(),
-        Dense(128, activation='relu'),
-        Dropout(0.5),
-        Dense(7, activation='softmax')
-    ])
+    model.add(Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(48, 48, 1)))
+    model.add(BatchNormalization())
+    model.add(Conv2D(32, (3, 3), padding='same', activation='relu'))
+    model.add(BatchNormalization())
+    model.add(MaxPooling2D(2, 2))
+    model.add(Dropout(0.25))
 
+    model.add(Conv2D(64, (3, 3), padding='same', activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Conv2D(64, (3, 3), padding='same', activation='relu'))
+    model.add(BatchNormalization())
+    model.add(MaxPooling2D(2, 2))
+    model.add(Dropout(0.25))
+
+    model.add(Conv2D(128, (3, 3), padding='same', activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Conv2D(128, (3, 3), padding='same', activation='relu'))
+    model.add(BatchNormalization())
+    model.add(MaxPooling2D(2, 2))
+    model.add(Dropout(0.25))
+
+    model.add(Flatten())
+    model.add(Dense(256, activation='relu'))
+    model.add(BatchNormalization())
+    model.add(Dropout(0.5))
+
+    model.add(Dense(7, activation='softmax'))
+
+    # -------------------------
+    # compilação
+    # -------------------------
     model.compile(
         optimizer='adam',
         loss='categorical_crossentropy',
@@ -532,10 +593,9 @@ def train_models_fer_cnn(X_raw, y, output_dir="plots_fer_cnn"):
     # treino
     # -------------------------
     history = model.fit(
-        X_train, y_train,
+        datagen.flow(X_train, y_train, batch_size=64),
         validation_data=(X_test, y_test),
-        epochs=20,
-        batch_size=64,
+        epochs=30,
         verbose=1
     )
 
@@ -544,7 +604,7 @@ def train_models_fer_cnn(X_raw, y, output_dir="plots_fer_cnn"):
     # -------------------------
     loss, acc = model.evaluate(X_test, y_test, verbose=0)
 
-    print("\nRESULTADOS CNN")
+    print("\nRESULTADOS CNN (IMPROVED)")
     print("Accuracy:", acc)
 
     return model, history, acc
@@ -566,7 +626,9 @@ if __name__ == "__main__":
     # FER-2013 (HOG + PCA + SVM)
     # -------------------------
     FER_TRAIN_PATH = "archive/train"
-    X_raw, y = load_fer_from_folders(FER_TRAIN_PATH, limit_per_class=3000) # 1000, 2000
+    FER_TEST_PATH = "archive/test"
+    X_raw, y = load_fer_from_folders(FER_TRAIN_PATH, limit_per_class=False) # 1000, 2000, 3000, 3170
+    X_test_raw, y_test = load_fer_from_folders(FER_TEST_PATH, limit_per_class=False)
 
     # SVM
     results_fer = train_models_fer_hog(X_raw, y)
