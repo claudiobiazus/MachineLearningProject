@@ -405,6 +405,9 @@ def train_models_fer_hog(X_train_raw, y_train, X_test_raw, y_test, output_dir="p
 
     print("Extraindo HOG features...")
 
+    X_train = extract_hog_features(X_train_raw)
+    X_test = extract_hog_features(X_test_raw)
+
     emotion_labels = {
         0: "Angry",
         1: "Disgust",
@@ -433,9 +436,6 @@ def train_models_fer_hog(X_train_raw, y_train, X_test_raw, y_test, output_dir="p
         pct = (counter_test[classe] / total_test) * 100
         print(f"{nome}: {counter_test[classe]} ({pct:.2f}%)")
 
-    X_train = extract_hog_features(X_train_raw)
-    X_test = extract_hog_features(X_test_raw)
-    # X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42 )
 
     print("\nDistribuição no treino:")
     train_counter = Counter(y_train)
